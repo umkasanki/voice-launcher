@@ -13,15 +13,15 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             TabView {
+                GeneralPane(state: state)
+                    .padding(.top, paneTopGap)
+                    .tabItem { Text("General") }
                 CommandsPane(state: state)
                     .padding(.top, paneTopGap)
                     .tabItem { Text("Commands") }
                 LogPane(state: state)
                     .padding(.top, paneTopGap)
                     .tabItem { Text("Log") }
-                GeneralPane(state: state)
-                    .padding(.top, paneTopGap)
-                    .tabItem { Text("General") }
             }
             .padding(.top, 8)
             Divider()
@@ -151,7 +151,7 @@ private struct CommandEditor: View {
                             .textSelection(.enabled)
                     }
                     LabeledContent("Match") {
-                        Text(isTesting ? "\(Int(state.testScore * 100))% (needs \(Int(state.threshold * 100))%)" : "—")
+                        Text(isTesting ? "\(Int((state.testScore * 100).rounded()))% (needs \(Int((state.threshold * 100).rounded()))%)" : "—")
                             .foregroundStyle(matchColor)
                     }
                     HStack {
@@ -267,7 +267,7 @@ private struct GeneralPane: View {
                         } maximumValueLabel: {
                             Text("Strict")
                         }
-                        Text("A phrase must match \(Int(state.threshold * 100))% of what is heard.")
+                        Text("A phrase must match \(Int((state.threshold * 100).rounded()))% of what is heard.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }

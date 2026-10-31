@@ -46,6 +46,24 @@ private struct CommandsPane: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            // Said before every command, so it sits above them.
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Key Phrase").font(.headline)
+                TextField("Key phrase", text: $state.keyPhrase, prompt: Text("Optional, e.g. a greeting"))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                Text("When set, a command runs only if this is said first and the command follows right after it.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 12)
+
+            Text("Commands")
+                .font(.headline)
+                .padding(.horizontal, 12)
+                .padding(.top, 24)
+                .padding(.bottom, 8)
+
             Table(state.commands, selection: $selection) {
                 TableColumn("On") { command in
                     Toggle("", isOn: Binding(
@@ -248,15 +266,6 @@ private struct GeneralPane: View {
 
     var body: some View {
         Form {
-            Section {
-                TextField("Key phrase", text: $state.keyPhrase, prompt: Text("Optional, e.g. a greeting"))
-            } header: {
-                Text("Key Phrase")
-            } footer: {
-                Text("When set, a command runs only if this is said first and the command follows right after it. Command phrases may include it or not.")
-                    .foregroundStyle(.secondary)
-            }
-
             Section {
                 LabeledContent("Match strictness") {
                     VStack(alignment: .leading, spacing: 4) {

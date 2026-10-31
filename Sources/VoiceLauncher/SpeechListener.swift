@@ -21,7 +21,7 @@ final class SpeechListener {
         var errorDescription: String? {
             switch self {
             case .recognizerUnavailable: return "On-device speech recognition for Russian is not available."
-            case .noMicrophone: return "No microphone is connected. Listening resumes when one appears."
+            case .noMicrophone: return "No microphone is connected."
             }
         }
     }
@@ -48,6 +48,8 @@ final class SpeechListener {
     private var rotationTimer: Timer?
     private var configObserver: NSObjectProtocol?
     private var retryTimer: Timer?
+    private var microphoneObserver: NSObjectProtocol?
+    private var microphoneAttempts = 0
     private var segmentStart = Date()
     private var quickFailures = 0
     private var hasProblem = false
@@ -55,6 +57,9 @@ final class SpeechListener {
     /// A task that fails this soon after starting is a failure, not silence.
     private let quickFailureWindow: TimeInterval = 1
     private let microphoneRetryInterval: TimeInterval = 3
+    /// Tries this many times, then waits for macOS to report a new microphone
+    /// instead of polling for ever.
+    private let microphoneRetryLimit = 5
 
     static func requestPermissions() async -> Bool {
         let speech = await withCheckedContinuation { continuation in
@@ -79,13 +84,22 @@ final class SpeechListener {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.restartAfterDeviceChange() }
         }
+        // Wakes the listener after it has given up waiting for a microphone.
+        microphoneObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard (notification.object as? AVCaptureDevice)?.hasMediaType(.audio) == true else { return }
+            MainActor.assumeIsolated { self?.microphoneConnected() }
+        }
     }
 
     func stop() {
         guard isRunning else { return }
         isRunning = false
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        if let microphoneObserver { NotificationCenter.default.removeObserver(microphoneObserver) }
         configObserver = nil
+        microphoneObserver = nil
         retryTimer?.invalidate()
         retryTimer = nil
         endSegment()
@@ -106,9 +120,16 @@ final class SpeechListener {
         retryTimer = nil
         do {
             try startEngine()
+            microphoneAttempts = 0
             beginSegment()
         } catch {
-            report(error.localizedDescription)
+            microphoneAttempts += 1
+            guard microphoneAttempts < microphoneRetryLimit else {
+                report("\(error.localizedDescription) Waiting until one is connected.")
+                return
+            }
+            // Said once, not on every retry, so the log is not flooded.
+            if microphoneAttempts == 1 { report("\(error.localizedDescription) Retrying.") }
             retryTimer = Timer.scheduledTimer(withTimeInterval: microphoneRetryInterval, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self, self.isRunning else { return }
@@ -116,6 +137,12 @@ final class SpeechListener {
                 }
             }
         }
+    }
+
+    private func microphoneConnected() {
+        guard isRunning, !engine.isRunning else { return }
+        microphoneAttempts = 0
+        startAudio()
     }
 
     private func startEngine() throws {
@@ -130,6 +157,10 @@ final class SpeechListener {
         }
         engine.prepare()
         try engine.start()
+        if hasProblem {
+            hasProblem = false
+            onRecovered?()
+        }
     }
 
     private func restartAfterDeviceChange() {
@@ -137,6 +168,8 @@ final class SpeechListener {
         endSegment()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        // A device change is news, so it earns a fresh round of attempts.
+        microphoneAttempts = 0
         startAudio()
     }
 

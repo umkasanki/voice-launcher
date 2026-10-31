@@ -11,16 +11,15 @@ struct VoiceLauncherApp: App {
             Image(systemName: state.isPaused ? "mic.slash" : "mic")
         }
 
-        Window("Voice Launcher", id: "settings") {
+        Settings {
             SettingsView(state: state)
-                .frame(minWidth: 760, minHeight: 460)
         }
     }
 }
 
 private struct MenuContent: View {
     @ObservedObject var state: AppState
-    @Environment(\.openWindow) private var openWindow
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Text(state.status)
@@ -30,8 +29,10 @@ private struct MenuContent: View {
         Divider()
         Button(state.isPaused ? "Resume Listening" : "Pause Listening") { state.togglePause() }
         Button("Settings…") {
-            openWindow(id: "settings")
+            // A menu-bar app is never frontmost by itself; without this the
+            // settings window opens behind the current app.
             NSApp.activate(ignoringOtherApps: true)
+            openSettings()
         }
         Divider()
         Button("Quit Voice Launcher") { NSApp.terminate(nil) }

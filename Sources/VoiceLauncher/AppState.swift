@@ -25,8 +25,8 @@ final class AppState: ObservableObject {
     @Published private(set) var lastHeard = ""
     @Published private(set) var log: [LogEntry] = []
 
-    /// The command whose "Test" sheet is open; actions do not run meanwhile.
-    @Published var testingCommandID: UUID?
+    /// The phrase being tested in the command editor; actions do not run meanwhile.
+    @Published private(set) var testPhrase: String?
     @Published private(set) var testScore = 0.0
 
     @Published var threshold: Double {
@@ -103,8 +103,8 @@ final class AppState: ObservableObject {
 
     private func heard(_ text: String) {
         lastHeard = text
-        if let id = testingCommandID, let command = commands.first(where: { $0.id == id }) {
-            let score = PhraseMatcher.score(phrase: PhraseMatcher.words(command.phrase), in: PhraseMatcher.words(text))
+        if let testPhrase {
+            let score = PhraseMatcher.score(phrase: PhraseMatcher.words(testPhrase), in: PhraseMatcher.words(text))
             testScore = max(testScore, score)
             return
         }
@@ -153,22 +153,33 @@ final class AppState: ObservableObject {
 
     // MARK: Testing a phrase
 
-    func startTest(_ id: UUID) {
+    func startTest(phrase: String) {
         testScore = 0
         lastHeard = ""
-        testingCommandID = id
+        testPhrase = phrase
         listener.restartSegment()
     }
 
     func stopTest() {
-        testingCommandID = nil
+        guard testPhrase != nil else { return }
+        testPhrase = nil
         listener.restartSegment()
     }
 
     // MARK: Commands
 
-    func addCommand() {
-        commands.append(Command(phrase: "", action: .openApp))
+    /// Replaces the command with the same id, or adds it as a new one.
+    func saveCommand(_ command: Command) {
+        if let index = commands.firstIndex(where: { $0.id == command.id }) {
+            commands[index] = command
+        } else {
+            commands.append(command)
+        }
+    }
+
+    func setEnabled(_ enabled: Bool, for id: UUID) {
+        guard let index = commands.firstIndex(where: { $0.id == id }) else { return }
+        commands[index].enabled = enabled
     }
 
     func deleteCommand(_ id: UUID) {
@@ -207,6 +218,10 @@ final class AppState: ObservableObject {
     }
 
     // MARK: Log
+
+    func clearLog() {
+        log.removeAll()
+    }
 
     private func report(_ message: String) {
         status = message

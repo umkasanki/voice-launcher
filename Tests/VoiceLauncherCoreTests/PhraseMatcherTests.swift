@@ -7,7 +7,7 @@ final class PhraseMatcherTests: XCTestCase {
     private let restart = Command(phrase: "hey mac restart tracking", action: .restartApp)
 
     func testWordsDropPunctuationAndCase() {
-        XCTAssertEqual(PhraseMatcher.words("Hey, Mac! Start   tracking."), ["hey", "mac", "start", "tracking"])
+        XCTAssertEqual(PhraseMatcher.words("Hey, Mac! Start   tracking."), PhraseMatcher.words("hey mac start tracking"))
     }
 
     func testWordsFoldYoIntoYe() {
@@ -50,5 +50,42 @@ final class PhraseMatcherTests: XCTestCase {
         var disabled = start
         disabled.enabled = false
         XCTAssertNil(PhraseMatcher.bestMatch(in: "hey mac start tracking", commands: [disabled], threshold: threshold))
+    }
+
+    // MARK: Key phrase
+
+    private let off = Command(phrase: "hey mac stop tracking", action: .quitApp)
+
+    func testKeyPhraseIsRequired() {
+        XCTAssertNil(PhraseMatcher.bestMatch(in: "stop tracking", commands: [off], threshold: 0.9, keyPhrase: "hey mac"))
+    }
+
+    func testKeyPhraseMustComeRightBeforeTheCommand() {
+        XCTAssertNil(PhraseMatcher.bestMatch(
+            in: "hey mac how are you stop tracking", commands: [off], threshold: 0.9, keyPhrase: "hey mac"))
+    }
+
+    func testKeyPhraseThenCommandMatches() {
+        let match = PhraseMatcher.bestMatch(
+            in: "well hey mac stop tracking please", commands: [off], threshold: 0.9, keyPhrase: "hey mac")
+        XCTAssertEqual(match?.command, off)
+    }
+
+    func testCommandPhraseWithoutKeyPhraseAlsoWorks() {
+        let bare = Command(phrase: "stop tracking", action: .quitApp)
+        XCTAssertNotNil(PhraseMatcher.bestMatch(in: "hey mac stop tracking", commands: [bare], threshold: 0.9, keyPhrase: "hey mac"))
+    }
+
+    // MARK: Alphabets and ambiguity
+
+    func testLatinAndCyrillicSpellingsMatch() {
+        // The recogniser may write a name in Latin letters: "Mac" for its Cyrillic spelling.
+        XCTAssertEqual(PhraseMatcher.words("Mac"), PhraseMatcher.words("\u{041C}\u{0430}\u{043A}"))
+    }
+
+    func testTooCloseToCallFiresNothing() {
+        let a = Command(phrase: "hey mac turn on", action: .openApp)
+        let b = Command(phrase: "hey mac turn one", action: .quitApp)
+        XCTAssertNil(PhraseMatcher.bestMatch(in: "hey mac turn onn", commands: [a, b], threshold: 0.8))
     }
 }

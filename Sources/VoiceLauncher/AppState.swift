@@ -32,6 +32,10 @@ final class AppState: ObservableObject {
     @Published var threshold: Double {
         didSet { UserDefaults.standard.set(threshold, forKey: "threshold") }
     }
+    /// Said before every command, e.g. a greeting; empty means no key phrase.
+    @Published var keyPhrase: String {
+        didSet { UserDefaults.standard.set(keyPhrase, forKey: "keyPhrase") }
+    }
     @Published var playsSound: Bool {
         didSet { UserDefaults.standard.set(playsSound, forKey: "playsSound") }
     }
@@ -56,8 +60,9 @@ final class AppState: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        defaults.register(defaults: ["threshold": 0.8, "playsSound": true])
+        defaults.register(defaults: ["threshold": 0.9, "playsSound": true, "keyPhrase": ""])
         threshold = defaults.double(forKey: "threshold")
+        keyPhrase = defaults.string(forKey: "keyPhrase") ?? ""
         playsSound = defaults.bool(forKey: "playsSound")
         commands = Self.loadCommands()
         listener.contextualStrings = commands.map(\.phrase)
@@ -104,7 +109,7 @@ final class AppState: ObservableObject {
     private func heard(_ text: String) {
         lastHeard = text
         if let testPhrase {
-            let score = PhraseMatcher.score(phrase: PhraseMatcher.words(testPhrase), in: PhraseMatcher.words(text))
+            let score = PhraseMatcher.score(command: testPhrase, keyPhrase: keyPhrase, in: text)
             testScore = max(testScore, score)
             return
         }
@@ -113,7 +118,7 @@ final class AppState: ObservableObject {
         // While paused, only a resume phrase is listened for.
         let candidates = isPaused ? commands.filter { $0.action == .resumeListening } : commands
         pendingWork?.cancel()
-        pending = PhraseMatcher.bestMatch(in: text, commands: candidates, threshold: threshold)
+        pending = PhraseMatcher.bestMatch(in: text, commands: candidates, threshold: threshold, keyPhrase: keyPhrase)
         guard pending != nil else { return }
 
         let work = DispatchWorkItem { [weak self] in

@@ -249,6 +249,15 @@ private struct GeneralPane: View {
     var body: some View {
         Form {
             Section {
+                TextField("Key phrase", text: $state.keyPhrase, prompt: Text("Optional, e.g. a greeting"))
+            } header: {
+                Text("Key Phrase")
+            } footer: {
+                Text("When set, a command runs only if this is said first and the command follows right after it. Command phrases may include it or not.")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 LabeledContent("Match strictness") {
                     VStack(alignment: .leading, spacing: 4) {
                         Slider(value: $state.threshold, in: 0.6...1.0, step: 0.05) {

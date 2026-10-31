@@ -2,20 +2,32 @@ import SwiftUI
 import UniformTypeIdentifiers
 import VoiceLauncherCore
 
-/// The standard macOS settings window: one toolbar tab per pane, each pane its
-/// own fixed size, as in Safari or Mail settings.
+/// The settings window, laid out like AllyClicker's: text tabs at the top, the
+/// pane below, and a footer with Done. Changes save as they are made.
 struct SettingsView: View {
     @ObservedObject var state: AppState
+    @Environment(\.dismissWindow) private var dismissWindow
 
     var body: some View {
-        TabView {
-            CommandsPane(state: state)
-                .tabItem { Label("Commands", systemImage: "mic") }
-            LogPane(state: state)
-                .tabItem { Label("Log", systemImage: "list.bullet.rectangle") }
-            GeneralPane(state: state)
-                .tabItem { Label("General", systemImage: "gearshape") }
+        VStack(spacing: 0) {
+            TabView {
+                CommandsPane(state: state)
+                    .tabItem { Text("Commands") }
+                LogPane(state: state)
+                    .tabItem { Text("Log") }
+                GeneralPane(state: state)
+                    .tabItem { Text("General") }
+            }
+            .padding(.top, 8)
+            Divider()
+            HStack {
+                Spacer()
+                Button("Done") { dismissWindow(id: "settings") }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(12)
         }
+        .frame(width: 720, height: 520)
     }
 }
 
@@ -76,7 +88,6 @@ private struct CommandsPane: View {
             }
             .padding(10)
         }
-        .frame(width: 680, height: 400)
         .sheet(item: $draft) { command in
             CommandEditor(state: state, draft: command) { saved in
                 state.saveCommand(saved)
@@ -222,7 +233,6 @@ private struct LogPane: View {
             }
             .padding(10)
         }
-        .frame(width: 680, height: 400)
     }
 }
 
@@ -268,6 +278,5 @@ private struct GeneralPane: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 320)
     }
 }

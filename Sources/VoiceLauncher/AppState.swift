@@ -99,7 +99,7 @@ final class AppState: ObservableObject {
         isPaused = paused
         updateStatus()
         addLog(paused ? "Paused" : "Resumed")
-        if playsSound { NSSound(named: paused ? "Bottle" : "Pop")?.play() }
+        if playsSound { SoundCue.play(paused ? "Bottle" : "Pop") }
     }
 
     private func updateStatus() {
@@ -144,14 +144,14 @@ final class AppState: ObservableObject {
             setPaused(false)
             return
         default:
-            if playsSound { NSSound(named: "Glass")?.play() }
+            if playsSound { SoundCue.play("Glass") }
         }
         Task {
             do {
                 try await ActionRunner.run(command)
             } catch {
                 report("\(command.action.title) failed: \(error.localizedDescription)")
-                if playsSound { NSSound(named: "Basso")?.play() }
+                if playsSound { SoundCue.play("Basso") }
             }
         }
     }

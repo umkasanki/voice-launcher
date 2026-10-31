@@ -38,9 +38,12 @@ keyUsage         = critical, digitalSignature
 extendedKeyUsage = critical, codeSigning
 basicConstraints = critical, CA:false
 CONF
-openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
+# The system LibreSSL, not Homebrew's OpenSSL 3+: newer OpenSSL writes PKCS#12
+# files with algorithms `security import` cannot read ("MAC verification failed").
+OPENSSL=/usr/bin/openssl
+$OPENSSL req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -keyout "$WORK/key.pem" -out "$WORK/cert.pem" -config "$WORK/cert.conf" >/dev/null 2>&1
-openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" \
+$OPENSSL pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" \
     -out "$WORK/identity.p12" -passout pass:$KCPASS -name "$IDENTITY" >/dev/null 2>&1
 
 echo "[2/5] Creating and unlocking the keychain..."

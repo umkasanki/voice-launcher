@@ -4,6 +4,8 @@
 #   ./App/build-app.sh             release build into build/
 #   ./App/build-app.sh --install   the same, then replace /Applications/Voice Launcher.app and launch it
 #
+# The release workflow and make-dmg.sh use it too.
+#
 # Launch the bundle (open, the Dock, login), never the bare binary: macOS
 # attributes the microphone grant to the bundle.
 set -euo pipefail
@@ -22,6 +24,18 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/VoiceLauncher "$APP/Contents/MacOS/VoiceLauncher"
 cp App/Info.plist "$APP/Contents/Info.plist"
+cp App/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+
+# Version from the nearest v* tag, so a local build reads like a release: v0.2.0
+# four commits on gives "0.2.0 (4)". Without tags App/Info.plist stands as it is.
+if DESC=$(git describe --tags --match 'v[0-9]*' 2>/dev/null); then
+    TAG="${DESC%-*-g*}"
+    AHEAD=0
+    [ "$TAG" != "$DESC" ] && AHEAD="${DESC#"$TAG"-}" && AHEAD="${AHEAD%%-*}"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${TAG#v}" \
+                            -c "Set :CFBundleVersion $AHEAD" "$APP/Contents/Info.plist"
+    echo "      version ${TAG#v} ($AHEAD)"
+fi
 
 echo "[3/4] Code signing..."
 if [ -f "$KC" ] && security find-identity "$KC" 2>/dev/null | grep -q "$IDENTITY"; then

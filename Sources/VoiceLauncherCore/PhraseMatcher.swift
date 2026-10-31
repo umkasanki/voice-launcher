@@ -20,15 +20,18 @@ public enum PhraseMatcher {
     }
 
     /// Lowercase words in Latin letters, punctuation dropped. Transliteration
-    /// makes the recogniser's choice of alphabet irrelevant; "c" is folded into
-    /// "k" because the two spell the same sound in transliterated names.
+    /// makes the recogniser's choice of alphabet irrelevant. A Latin "c" in the
+    /// original text is read as "k", as in a name like "Mac"; this happens
+    /// before transliteration, so the Cyrillic letters that transliterate to
+    /// "c" (ts, ch) stay distinct from "k".
     public static func words(_ text: String) -> [String] {
-        let latin = text.lowercased()
-            .replacingOccurrences(of: "\u{0451}", with: "\u{0435}")
-            .applyingTransform(.toLatin, reverse: false)?
-            .applyingTransform(.stripDiacritics, reverse: false) ?? text.lowercased()
-        return latin
+        let lowered = text.lowercased()
             .replacingOccurrences(of: "c", with: "k")
+            .replacingOccurrences(of: "\u{0451}", with: "\u{0435}")
+        let latin = lowered
+            .applyingTransform(.toLatin, reverse: false)?
+            .applyingTransform(.stripDiacritics, reverse: false) ?? lowered
+        return latin
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
     }
@@ -49,9 +52,13 @@ public enum PhraseMatcher {
     /// A command phrase that already begins with the key phrase has it dropped,
     /// so phrases typed either way behave the same.
     public static func score(command phrase: String, keyPhrase: String, in transcript: String) -> Double {
-        let heard = words(transcript)
-        let key = words(keyPhrase)
-        var body = words(phrase)
+        score(body: words(phrase), key: words(keyPhrase), heard: words(transcript))
+    }
+
+    /// The same on words already prepared, so a transcript is converted once
+    /// per update rather than once per command.
+    private static func score(body phrase: [String], key: [String], heard: [String]) -> Double {
+        var body = phrase
         guard !key.isEmpty else { return score(phrase: body, in: heard) }
 
         if body.count > key.count, similarity(key, body[0..<key.count]) >= 0.8 {
@@ -72,19 +79,18 @@ public enum PhraseMatcher {
     /// The enabled command that scores highest against `transcript`, if it
     /// reaches `threshold` and is clearly ahead of the runner-up. Two commands
     /// within `margin` of each other — "on" and "off" said indistinctly — are
-    /// too close to call, and nothing fires. On an exact tie the longer phrase
-    /// wins: it is the more specific of the two.
+    /// too close to call, and nothing fires; an exact tie is the closest case.
     public static func bestMatch(in transcript: String, commands: [Command], threshold: Double,
                                  keyPhrase: String = "", margin: Double = 0.05) -> Match? {
+        let heard = words(transcript)
+        let key = words(keyPhrase)
         var best: Match?
         var runnerUp = 0.0
         for command in commands where command.enabled {
-            let score = score(command: command.phrase, keyPhrase: keyPhrase, in: transcript)
+            let score = score(body: words(command.phrase), key: key, heard: heard)
             guard score >= threshold else { continue }
             if let current = best {
-                let better = score > current.score
-                    || (score == current.score && command.phrase.count > current.command.phrase.count)
-                if !better {
+                guard score > current.score else {
                     runnerUp = max(runnerUp, score)
                     continue
                 }

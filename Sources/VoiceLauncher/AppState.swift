@@ -16,7 +16,7 @@ final class AppState: ObservableObject {
         didSet {
             guard commands != oldValue else { return }
             saveCommands()
-            listener.contextualStrings = commands.map(\.phrase)
+            updateHints()
         }
     }
     @Published private(set) var isPaused = false
@@ -34,7 +34,10 @@ final class AppState: ObservableObject {
     }
     /// Said before every command, e.g. a greeting; empty means no key phrase.
     @Published var keyPhrase: String {
-        didSet { UserDefaults.standard.set(keyPhrase, forKey: "keyPhrase") }
+        didSet {
+            UserDefaults.standard.set(keyPhrase, forKey: "keyPhrase")
+            updateHints()
+        }
     }
     @Published var playsSound: Bool {
         didSet { UserDefaults.standard.set(playsSound, forKey: "playsSound") }
@@ -57,6 +60,9 @@ final class AppState: ObservableObject {
     }()
     private static let logFileURL = FileManager.default.homeDirectoryForCurrentUser
         .appendingPathComponent("Library/Logs/VoiceLauncher.log")
+    private static let logDateFormatter = ISO8601DateFormatter()
+    /// The log file is cut back to its newer half once it grows past this.
+    private static let maxLogFileSize = 512 * 1024
 
     init() {
         let defaults = UserDefaults.standard
@@ -65,11 +71,16 @@ final class AppState: ObservableObject {
         keyPhrase = defaults.string(forKey: "keyPhrase") ?? ""
         playsSound = defaults.bool(forKey: "playsSound")
         commands = Self.loadCommands()
-        listener.contextualStrings = commands.map(\.phrase)
+        updateHints()
+        Self.trimLogFile()
 
         listener.onTranscript = { [weak self] in self?.heard($0) }
         listener.onSegmentEnd = { [weak self] in self?.addLog("Heard: \($0)", toFile: false) }
         listener.onError = { [weak self] in self?.report($0) }
+        listener.onRecovered = { [weak self] in
+            self?.updateStatus()
+            self?.addLog("Listening again")
+        }
 
         Task { await startListening() }
     }
@@ -96,6 +107,7 @@ final class AppState: ObservableObject {
     }
 
     private func setPaused(_ paused: Bool) {
+        cancelPending()
         isPaused = paused
         updateStatus()
         addLog(paused ? "Paused" : "Resumed")
@@ -117,9 +129,13 @@ final class AppState: ObservableObject {
 
         // While paused, only a resume phrase is listened for.
         let candidates = isPaused ? commands.filter { $0.action == .resumeListening } : commands
+        // No match keeps a pending one: the next transcript may come from a
+        // fresh segment that no longer holds the phrase, and the command must
+        // not be lost to that. A different match replaces it.
+        guard let match = PhraseMatcher.bestMatch(
+            in: text, commands: candidates, threshold: threshold, keyPhrase: keyPhrase) else { return }
         pendingWork?.cancel()
-        pending = PhraseMatcher.bestMatch(in: text, commands: candidates, threshold: threshold, keyPhrase: keyPhrase)
-        guard pending != nil else { return }
+        pending = match
 
         let work = DispatchWorkItem { [weak self] in
             guard let self, let match = self.pending else { return }
@@ -159,6 +175,7 @@ final class AppState: ObservableObject {
     // MARK: Testing a phrase
 
     func startTest(phrase: String) {
+        cancelPending()
         testScore = 0
         lastHeard = ""
         testPhrase = phrase
@@ -169,6 +186,20 @@ final class AppState: ObservableObject {
         guard testPhrase != nil else { return }
         testPhrase = nil
         listener.restartSegment()
+    }
+
+    private func cancelPending() {
+        pendingWork?.cancel()
+        pendingWork = nil
+        pending = nil
+    }
+
+    /// Recognition hints: each command as it is actually spoken, after the key
+    /// phrase, and the key phrase alone.
+    private func updateHints() {
+        let key = keyPhrase.trimmingCharacters(in: .whitespaces)
+        let spoken = commands.map { key.isEmpty ? $0.phrase : "\(key) \($0.phrase)" }
+        listener.contextualStrings = key.isEmpty ? spoken : [key] + spoken
     }
 
     // MARK: Commands
@@ -240,7 +271,7 @@ final class AppState: ObservableObject {
         log.append(LogEntry(text: text))
         if log.count > maxLogEntries { log.removeFirst(log.count - maxLogEntries) }
         guard toFile else { return }
-        let line = "\(ISO8601DateFormatter().string(from: Date())) \(text)\n"
+        let line = "\(Self.logDateFormatter.string(from: Date())) \(text)\n"
         guard let data = line.data(using: .utf8) else { return }
         if let handle = try? FileHandle(forWritingTo: Self.logFileURL) {
             handle.seekToEndOfFile()
@@ -249,5 +280,12 @@ final class AppState: ObservableObject {
         } else {
             try? data.write(to: Self.logFileURL)
         }
+    }
+
+    private static func trimLogFile() {
+        guard let data = try? Data(contentsOf: logFileURL), data.count > maxLogFileSize else { return }
+        var tail = data.suffix(maxLogFileSize / 2)
+        if let newline = tail.firstIndex(of: UInt8(ascii: "\n")) { tail = tail[(newline + 1)...] }
+        try? Data(tail).write(to: logFileURL, options: .atomic)
     }
 }

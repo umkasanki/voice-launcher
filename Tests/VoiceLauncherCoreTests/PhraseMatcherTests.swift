@@ -88,4 +88,18 @@ final class PhraseMatcherTests: XCTestCase {
         let b = Command(phrase: "hey mac turn one", action: .quitApp)
         XCTAssertNil(PhraseMatcher.bestMatch(in: "hey mac turn onn", commands: [a, b], threshold: 0.8))
     }
+
+    func testExactTieFiresNothing() {
+        let a = Command(phrase: "hey mac start", action: .openApp)
+        let b = Command(phrase: "hey mac start", action: .quitApp)
+        XCTAssertNil(PhraseMatcher.bestMatch(in: "hey mac start", commands: [a, b], threshold: 0.8))
+    }
+
+    func testCyrillicTsAndChStayDistinctFromK() {
+        // Only a Latin "c" is read as "k"; Cyrillic letters that transliterate to "c" are not.
+        let k = PhraseMatcher.words("\u{043A}")
+        XCTAssertNotEqual(PhraseMatcher.words("\u{0447}"), k)
+        XCTAssertNotEqual(PhraseMatcher.words("\u{0446}"), k)
+        XCTAssertEqual(PhraseMatcher.words("c"), k)
+    }
 }

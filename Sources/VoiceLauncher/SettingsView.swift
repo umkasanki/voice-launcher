@@ -82,7 +82,10 @@ private struct CommandsPane: View {
             .contextMenu(forSelectionType: Command.ID.self) { ids in
                 if let id = ids.first {
                     Button("Edit…") { edit(id) }
-                    Button("Delete") { state.deleteCommand(id) }
+                    Button("Delete") {
+                        state.deleteCommand(id)
+                        if selection == id { selection = nil }
+                    }
                 }
             } primaryAction: { ids in
                 if let id = ids.first { edit(id) }

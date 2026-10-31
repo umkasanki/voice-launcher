@@ -16,9 +16,13 @@ import Speech
 final class SpeechListener {
     enum ListenerError: LocalizedError {
         case recognizerUnavailable
+        case noMicrophone
 
         var errorDescription: String? {
-            "On-device speech recognition for Russian is not available."
+            switch self {
+            case .recognizerUnavailable: return "On-device speech recognition for Russian is not available."
+            case .noMicrophone: return "No microphone is connected. Listening resumes when one appears."
+            }
         }
     }
 
@@ -27,6 +31,8 @@ final class SpeechListener {
     /// A segment ended with this text; used for the in-memory log.
     var onSegmentEnd: ((String) -> Void)?
     var onError: ((String) -> Void)?
+    /// Audio is flowing again after `onError` reported a problem.
+    var onRecovered: (() -> Void)?
 
     /// Phrases the recogniser should expect; improves their recognition.
     var contextualStrings: [String] = []
@@ -41,7 +47,14 @@ final class SpeechListener {
     private var segmentText = ""
     private var rotationTimer: Timer?
     private var configObserver: NSObjectProtocol?
+    private var retryTimer: Timer?
+    private var segmentStart = Date()
+    private var quickFailures = 0
+    private var hasProblem = false
     private let segmentLength: TimeInterval = 50
+    /// A task that fails this soon after starting is a failure, not silence.
+    private let quickFailureWindow: TimeInterval = 1
+    private let microphoneRetryInterval: TimeInterval = 3
 
     static func requestPermissions() async -> Bool {
         let speech = await withCheckedContinuation { continuation in
@@ -56,9 +69,8 @@ final class SpeechListener {
         guard let recognizer, recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else {
             throw ListenerError.recognizerUnavailable
         }
-        try startEngine()
         isRunning = true
-        beginSegment()
+        startAudio()
 
         // A microphone plugged in or out changes the input format, and the
         // engine stops. Start it again on whatever the input is now.
@@ -74,6 +86,8 @@ final class SpeechListener {
         isRunning = false
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
         configObserver = nil
+        retryTimer?.invalidate()
+        retryTimer = nil
         endSegment()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
@@ -85,9 +99,31 @@ final class SpeechListener {
         if isRunning { beginSegment() }
     }
 
+    /// Starts the engine and a segment, or reports the problem and tries again
+    /// shortly. The Mac may have no microphone at all until a USB one appears.
+    private func startAudio() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        do {
+            try startEngine()
+            beginSegment()
+        } catch {
+            report(error.localizedDescription)
+            retryTimer = Timer.scheduledTimer(withTimeInterval: microphoneRetryInterval, repeats: false) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.isRunning else { return }
+                    self.startAudio()
+                }
+            }
+        }
+    }
+
     private func startEngine() throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        // With no input device the format is empty, and installTap would raise
+        // an Objective-C exception that ends the process.
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw ListenerError.noMicrophone }
         let sink = self.sink
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
             sink.append(buffer)
@@ -101,16 +137,16 @@ final class SpeechListener {
         endSegment()
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        do {
-            try startEngine()
-            beginSegment()
-        } catch {
-            onError?("Microphone restart failed: \(error.localizedDescription)")
-        }
+        startAudio()
+    }
+
+    private func report(_ message: String) {
+        hasProblem = true
+        onError?(message)
     }
 
     private func beginSegment() {
-        guard let recognizer else { return }
+        guard let recognizer, engine.isRunning else { return }
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
@@ -121,31 +157,44 @@ final class SpeechListener {
         let id = UUID()
         segmentID = id
         segmentText = ""
+        segmentStart = Date()
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let isFinal = result?.isFinal ?? false
-            let failed = error != nil
             DispatchQueue.main.async {
                 guard let self, self.segmentID == id else { return }
                 if let text {
                     self.segmentText = text
+                    self.quickFailures = 0
+                    if self.hasProblem {
+                        self.hasProblem = false
+                        self.onRecovered?()
+                    }
                     self.onTranscript?(text)
                 }
                 if isFinal {
                     self.restartSegment()
-                } else if failed {
-                    // Silence ends a task with an error too. Pause briefly so a
-                    // recogniser that fails at once does not spin.
-                    self.endSegment()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        if self.isRunning && self.segmentID == nil { self.beginSegment() }
-                    }
+                } else if let error {
+                    self.segmentFailed(error)
                 }
             }
         }
 
         rotationTimer = Timer.scheduledTimer(withTimeInterval: segmentLength, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.restartSegment() }
+        }
+    }
+
+    /// Silence ends a task with an error too, so one failure is normal. Tasks
+    /// that keep failing at once are not: say so, and retry less often.
+    private func segmentFailed(_ error: Error) {
+        let quick = Date().timeIntervalSince(segmentStart) < quickFailureWindow
+        quickFailures = quick ? quickFailures + 1 : 0
+        if quickFailures == 3 { report("Speech recognition keeps failing: \(error.localizedDescription)") }
+        endSegment()
+        let delay: TimeInterval = quickFailures >= 3 ? 5 : 0.3
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            if self.isRunning && self.segmentID == nil { self.beginSegment() }
         }
     }
 

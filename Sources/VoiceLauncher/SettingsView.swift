@@ -6,23 +6,28 @@ import VoiceLauncherCore
 /// pane below, and a footer with Done. Changes save as they are made.
 struct SettingsView: View {
     @ObservedObject var state: AppState
-    @Environment(\.dismissWindow) private var dismissWindow
+    let onDone: () -> Void
+    /// Room between the tabs and the pane, about one line of text.
+    private let paneTopGap: CGFloat = 16
 
     var body: some View {
         VStack(spacing: 0) {
             TabView {
                 CommandsPane(state: state)
+                    .padding(.top, paneTopGap)
                     .tabItem { Text("Commands") }
                 LogPane(state: state)
+                    .padding(.top, paneTopGap)
                     .tabItem { Text("Log") }
                 GeneralPane(state: state)
+                    .padding(.top, paneTopGap)
                     .tabItem { Text("General") }
             }
             .padding(.top, 8)
             Divider()
             HStack {
                 Spacer()
-                Button("Done") { dismissWindow(id: "settings") }
+                Button("Done") { onDone() }
                     .keyboardShortcut(.defaultAction)
             }
             .padding(12)

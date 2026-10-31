@@ -3,26 +3,20 @@ import SwiftUI
 @main
 struct VoiceLauncherApp: App {
     @StateObject private var state = AppState()
+    private let settingsWindow = SettingsWindowController()
 
     var body: some Scene {
         MenuBarExtra {
-            MenuContent(state: state)
+            MenuContent(state: state, openSettings: { settingsWindow.show(state: state) })
         } label: {
             Image(systemName: state.isPaused ? "mic.slash" : "mic")
         }
-
-        // An ordinary titled window, as in AllyClicker, rather than the
-        // Settings scene: text tabs in the content and a Done button below.
-        Window("Voice Launcher Settings", id: "settings") {
-            SettingsView(state: state)
-        }
-        .windowResizability(.contentSize)
     }
 }
 
 private struct MenuContent: View {
     @ObservedObject var state: AppState
-    @Environment(\.openWindow) private var openWindow
+    let openSettings: () -> Void
 
     var body: some View {
         Text(state.status)
@@ -31,12 +25,7 @@ private struct MenuContent: View {
         }
         Divider()
         Button(state.isPaused ? "Resume Listening" : "Pause Listening") { state.togglePause() }
-        Button("Settings…") {
-            // A menu-bar app is never frontmost by itself; without this the
-            // settings window opens behind the current app.
-            NSApp.activate(ignoringOtherApps: true)
-            openWindow(id: "settings")
-        }
+        Button("Settings…") { openSettings() }
         Divider()
         Button("Quit Voice Launcher") { NSApp.terminate(nil) }
     }
